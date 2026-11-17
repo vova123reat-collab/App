@@ -9,12 +9,24 @@ export async function generateJson<T>(prompt: string, schema: Schema, temperatur
   if (!apiKey) throw Object.assign(new Error("GEMINI_API_KEY не задано"), { status: 503 });
 
   const ai = new GoogleGenAI({ apiKey });
-  const call = (model: string) =>
+  const once = (model: string) =>
     ai.models.generateContent({
       model,
       contents: prompt,
       config: { responseMimeType: "application/json", responseSchema: schema, temperature },
     });
+  // 503 / 429 «модель перевантажена» — зазвичай минає за секунду-дві.
+  const call = async (model: string) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await once(model);
+      } catch (e) {
+        const st = (e as { status?: number }).status;
+        if ((st !== 503 && st !== 429) || attempt >= 2) throw e;
+        await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
+      }
+    }
+  };
 
   const wanted = process.env.GEMINI_MODEL || DEFAULT_MODEL;
   let res;

@@ -12,7 +12,7 @@ interface OffProduct {
   code?: string;
   product_name?: string;
   product_name_uk?: string;
-  brands?: string;
+  brands?: string | string[];
   serving_quantity?: number | string;
   nutriments?: Record<string, number | string | undefined>;
 }
@@ -27,9 +27,10 @@ function mapOff(p: OffProduct) {
   const kcal = num(n["energy-kcal_100g"]) || Math.round(num(n["energy_100g"]) / 4.184);
   const name = (p.product_name_uk || p.product_name || "").trim();
   if (!name) return null;
+  const brand = (Array.isArray(p.brands) ? p.brands[0] : p.brands?.split(",")[0])?.trim();
   return {
     id: `off-${p.code}`,
-    name: p.brands ? `${name} · ${p.brands.split(",")[0].trim()}` : name,
+    name: brand ? `${name} · ${brand}` : name,
     kcal,
     protein: num(n["proteins_100g"]),
     fat: num(n["fat_100g"]),
@@ -56,12 +57,12 @@ export async function GET(req: Request) {
       return NextResponse.json({ items: [item] });
     }
     if (q && q.length >= 2) {
-      const params = new URLSearchParams({
-        search_terms: q, search_simple: "1", action: "process", json: "1", page_size: "20", fields: FIELDS,
-      });
-      const r = await fetch(`${OFF}/cgi/search.pl?${params}`, { headers: UA, signal, next: { revalidate: 86400 } });
-      const j = (await r.json()) as { products?: OffProduct[] };
-      const items = (j.products ?? []).map(mapOff).filter((x) => x && x.kcal > 0).slice(0, 15);
+      // Новий пошуковий API OFF (search-a-licious); старий cgi/search.pl блокує сервери.
+      const params = new URLSearchParams({ q, langs: "uk,ru,en", page_size: "25", fields: FIELDS });
+      const r = await fetch(`https://search.openfoodfacts.org/search?${params}`, { headers: UA, signal, next: { revalidate: 86400 } });
+      if (!r.ok) throw new Error(`OFF search ${r.status}`);
+      const j = (await r.json()) as { hits?: OffProduct[] };
+      const items = (j.hits ?? []).map(mapOff).filter((x) => x && x.kcal > 0).slice(0, 15);
       return NextResponse.json({ items });
     }
     return NextResponse.json({ items: [] });
