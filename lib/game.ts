@@ -95,6 +95,8 @@ export interface Profile {
   proteinPerKg: number; // г білка на кг
   waterPerKg: number; // мл води на кг
   kcalGoal?: number; // ккал на день (0/порожньо = не відстежувати)
+  fatGoal?: number; // г жирів на день (з плану тренувань)
+  carbsGoal?: number; // г вуглеводів на день
 }
 
 export const SKILL_TARGET_MIN = 20 * 60;

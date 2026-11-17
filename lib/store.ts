@@ -6,6 +6,10 @@ import {
   FoodEntry, HP_GAIN_PER_QUEST, HP_LOSS_PER_MISSED_QUEST, HP_MAX, Nutrition, Profile, Quest, QUEST_XP,
   Session, Skill, Stage, Timer, today, uid,
 } from "./game";
+import { ACTIVITIES } from "./game";
+import {
+  ActiveWorkout, emptyTraining, LoggedSet, TrainingAnswers, TrainingPlan, TrainingState, WorkoutLog, workoutXp,
+} from "./training";
 
 export interface GameState {
   profile: Profile;
@@ -17,6 +21,7 @@ export interface GameState {
   sessions: Session[];
   quests: Quest[];
   timer: Timer | null;
+  training: TrainingState;
   updatedAt: number;
 }
 
@@ -39,6 +44,15 @@ interface Actions {
   cancelTimer: () => void;
   applyDailyTick: () => void;
   replaceAll: (s: GameState) => void;
+  setTrainingAnswers: (a: TrainingAnswers) => void;
+  setPlan: (p: TrainingPlan | undefined) => void;
+  applyPlanNutrition: () => void;
+  startWorkout: (dayIndex: number) => void;
+  updateSet: (ex: number, set: number, patch: Partial<LoggedSet>) => void;
+  addSet: (ex: number) => void;
+  finishWorkout: () => WorkoutLog | null;
+  cancelWorkout: () => void;
+  deleteWorkoutLog: (id: string) => void;
 }
 
 export const initialState = (): GameState => ({
@@ -51,6 +65,7 @@ export const initialState = (): GameState => ({
   sessions: [],
   quests: DEFAULT_QUESTS,
   timer: null,
+  training: emptyTraining(),
   updatedAt: Date.now(),
 });
 
@@ -220,6 +235,90 @@ export const useGame = create<GameState & Actions>()(
         },
 
         replaceAll: (state) => set(normalize(state)),
+
+        setTrainingAnswers: (a) => set(touch({ training: { ...get().training, answers: a } })),
+        setPlan: (p) => set(touch({ training: { ...get().training, plan: p, active: null } })),
+
+        /** Переносить КБЖВ з плану в цілі «Палива». */
+        applyPlanNutrition: () => {
+          const { training, profile } = get();
+          const n = training.plan?.nutrition;
+          if (!n) return;
+          const w = training.answers?.weightKg ?? profile.weightKg;
+          set(touch({
+            profile: {
+              ...profile,
+              weightKg: w,
+              proteinPerKg: Math.round((n.protein / w) * 100) / 100,
+              waterPerKg: n.waterMl ? Math.round(n.waterMl / w) : profile.waterPerKg,
+              kcalGoal: n.kcal,
+              fatGoal: n.fat,
+              carbsGoal: n.carbs,
+            },
+          }));
+        },
+
+        startWorkout: (dayIndex) => {
+          const day = get().training.plan?.days[dayIndex];
+          if (!day) return;
+          const active: ActiveWorkout = {
+            dayIndex,
+            startedAt: Date.now(),
+            sets: day.exercises.map((e) => Array.from({ length: e.sets }, () => ({ weight: 0, reps: 0, done: false }))),
+          };
+          set(touch({ training: { ...get().training, active } }));
+        },
+
+        updateSet: (ex, si, patch) => {
+          const t = get().training;
+          if (!t.active) return;
+          const sets = t.active.sets.map((row, i) => (i !== ex ? row : row.map((st, j) => (j === si ? { ...st, ...patch } : st))));
+          set(touch({ training: { ...t, active: { ...t.active, sets } } }));
+        },
+
+        addSet: (ex) => {
+          const t = get().training;
+          if (!t.active) return;
+          const sets = t.active.sets.map((row, i) => {
+            if (i !== ex) return row;
+            const last = row[row.length - 1];
+            return [...row, { weight: last?.weight ?? 0, reps: last?.reps ?? 0, done: false }];
+          });
+          set(touch({ training: { ...t, active: { ...t.active, sets } } }));
+        },
+
+        cancelWorkout: () => set(touch({ training: { ...get().training, active: null } })),
+
+        finishWorkout: () => {
+          const s = get();
+          const t = s.training;
+          const day = t.plan?.days[t.active?.dayIndex ?? -1];
+          if (!t.active || !day) return null;
+          const minutes = Math.max(1, Math.round((Date.now() - t.active.startedAt) / 60000));
+          const exercises = day.exercises
+            .map((e, i) => ({
+              name: e.name,
+              sets: (t.active!.sets[i] ?? []).filter((x) => x.done).map(({ weight, reps }) => ({ weight, reps })),
+            }))
+            .filter((e) => e.sets.length);
+          const doneSets = exercises.reduce((a, e) => a + e.sets.length, 0);
+          if (!doneSets) {
+            set(touch({ training: { ...t, active: null } }));
+            return null;
+          }
+          const xp = Math.round(workoutXp(minutes, doneSets) * (isBuffed(s) ? BUFF_MULT : 1));
+          const log: WorkoutLog = { id: uid(), date: today(), dayName: day.name, minutes, xp, exercises };
+          const strength = ACTIVITIES.find((a) => a.id === "a-strength")!;
+          const entry: ActivityEntry = { id: uid(), activityId: strength.id, amount: minutes, attr: "str", xp, at: Date.now() };
+          updateDay((d) => ({ ...d, activities: [...(d.activities ?? []), entry] }));
+          set(touch({
+            training: { ...t, active: null, logs: [log, ...t.logs].slice(0, 300) },
+            xp: { ...get().xp, str: get().xp.str + xp },
+          }));
+          return log;
+        },
+
+        deleteWorkoutLog: (id) => set(touch({ training: { ...get().training, logs: get().training.logs.filter((l) => l.id !== id) } })),
       };
     },
     {
@@ -228,8 +327,8 @@ export const useGame = create<GameState & Actions>()(
       migrate: (persisted) => normalize(persisted as GameState),
       partialize: (s) => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { profile, xp, hp, hpCheckedThrough, days, skills, sessions, quests, timer, updatedAt } = s;
-        return { profile, xp, hp, hpCheckedThrough, days, skills, sessions, quests, timer, updatedAt };
+        const { profile, xp, hp, hpCheckedThrough, days, skills, sessions, quests, timer, training, updatedAt } = s;
+        return { profile, xp, hp, hpCheckedThrough, days, skills, sessions, quests, timer, training, updatedAt };
       },
     },
   ),
@@ -237,10 +336,15 @@ export const useGame = create<GameState & Actions>()(
 
 /** Приводить старі збереження (v1: лише INT/STR) до поточної форми. */
 export function normalize(s: GameState): GameState {
-  return { ...initialState(), ...s, xp: { ...emptyXp(), ...(s?.xp ?? {}) } };
+  return {
+    ...initialState(),
+    ...s,
+    xp: { ...emptyXp(), ...(s?.xp ?? {}) },
+    training: { ...emptyTraining(), ...(s?.training ?? {}) },
+  };
 }
 
 export const snapshot = (): GameState => {
-  const { profile, xp, hp, hpCheckedThrough, days, skills, sessions, quests, timer, updatedAt } = useGame.getState();
-  return { profile, xp, hp, hpCheckedThrough, days, skills, sessions, quests, timer, updatedAt };
+  const { profile, xp, hp, hpCheckedThrough, days, skills, sessions, quests, timer, training, updatedAt } = useGame.getState();
+  return { profile, xp, hp, hpCheckedThrough, days, skills, sessions, quests, timer, training, updatedAt };
 };

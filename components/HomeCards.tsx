@@ -94,7 +94,9 @@ export function FuelCard() {
             <div>
               <div className="flex justify-between text-sm"><b>ККАЛ</b><span className="text-mute text-xs">{log.kcal ?? 0}/{kg}</span></div>
               <Bar value={log.kcal ?? 0} max={kg} color={(log.kcal ?? 0) > kg * 1.1 ? "#f97316" : "linear-gradient(90deg,#a16207,#facc15)"} />
-              <div className="mt-0.5 text-[10px] text-mute tabular-nums">Ж {log.fat ?? 0} · В {log.carbs ?? 0}</div>
+              <div className="mt-0.5 text-[10px] text-mute tabular-nums">
+                Ж {log.fat ?? 0}{s.profile.fatGoal ? `/${s.profile.fatGoal}` : ""} · В {log.carbs ?? 0}{s.profile.carbsGoal ? `/${s.profile.carbsGoal}` : ""}
+              </div>
             </div>
           )}
           <div>

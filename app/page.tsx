@@ -4,17 +4,19 @@ import { CharacterCard, FocusCard, FuelCard } from "@/components/HomeCards";
 import { SkillsScreen } from "@/components/SkillsScreen";
 import { QuestsScreen } from "@/components/QuestsScreen";
 import { ActivityScreen } from "@/components/ActivityScreen";
+import { TrainingScreen } from "@/components/TrainingScreen";
 import { Card } from "@/components/ui";
 import { AccountBox } from "@/components/AccountBox";
 import { useGame } from "@/lib/store";
 import { startSync, SyncStatus } from "@/lib/supabase";
 import { kcalGoal, proteinGoal, waterGoal } from "@/lib/game";
 
-type Tab = "home" | "skills" | "activity" | "quests";
+type Tab = "home" | "skills" | "training" | "activity" | "quests";
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "home", label: "Персонаж", icon: "◉" },
   { id: "skills", label: "Навички", icon: "⌬" },
+  { id: "training", label: "Тренування", icon: "🏋" },
   { id: "activity", label: "Активність", icon: "⚡" },
   { id: "quests", label: "Квести", icon: "☰" },
 ];
@@ -96,11 +98,12 @@ export default function Home() {
         </div>
       )}
       {tab === "skills" && <SkillsScreen />}
+      {tab === "training" && <TrainingScreen />}
       {tab === "activity" && <ActivityScreen />}
       {tab === "quests" && <QuestsScreen />}
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-bg/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto grid max-w-5xl grid-cols-4">
+        <div className="mx-auto grid max-w-5xl grid-cols-5">
           {TABS.map((t) => (
             <button
               key={t.id}
