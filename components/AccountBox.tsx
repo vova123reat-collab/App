@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Label } from "./ui";
-import { Account, CodeMode, onAccount, requestCode, signOut, supabase, verifyCode } from "@/lib/supabase";
+import { Account, CodeMode, onAccount, refreshAccount, requestCode, signOut, supabase, verifyCode } from "@/lib/supabase";
 
 export function AccountBox() {
   const [acc, setAcc] = useState<Account | null>(null);
@@ -12,6 +12,20 @@ export function AccountBox() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => onAccount(setAcc), []);
+
+  // Поки чекаємо підтвердження прив'язки — перевіряємо сервер кожні 4 с
+  // (користувач міг натиснути посилання в листі в іншому браузері).
+  useEffect(() => {
+    if (mode !== "link") return;
+    const t = setInterval(async () => {
+      const a = await refreshAccount();
+      if (a?.email) {
+        setMode(null); setCode("");
+        setMsg({ ok: true, text: "Email прив'язано — прогрес збережено ✓" });
+      }
+    }, 4000);
+    return () => clearInterval(t);
+  }, [mode]);
 
   if (!supabase) return null;
 
@@ -26,7 +40,12 @@ export function AccountBox() {
     if (!/^\S+@\S+\.\S+$/.test(e)) throw new Error("Невірний email");
     const m = await requestCode(e);
     setMode(m);
-    setMsg({ ok: true, text: `Лист надіслано на ${e} (перевір «Спам»). Натисни посилання в листі — або скопіюй його і встав сюди.` });
+    setMsg({
+      ok: true,
+      text: m === "link"
+        ? `Лист надіслано на ${e} (перевір «Спам»). Натисни кнопку в листі — тут підхопиться само за кілька секунд.`
+        : `Лист надіслано на ${e} (перевір «Спам»). На iPhone у програмі з головного екрана: НЕ натискай, а затисни кнопку → «Скопіювати посилання» і встав сюди.`,
+    });
   });
 
   const verify = () => run(async () => {

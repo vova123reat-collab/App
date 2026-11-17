@@ -25,8 +25,29 @@ const toAccount = (u: User | null | undefined): Account | null =>
 
 export function onAccount(fn: (a: Account | null) => void) {
   accountListeners.add(fn);
-  supabase?.auth.getUser().then(({ data }) => fn(toAccount(data.user)));
-  return () => { accountListeners.delete(fn); };
+  refreshAccount();
+  const { data: sub } = supabase?.auth.onAuthStateChange((_e, session) => fn(toAccount(session?.user))) ?? { data: null };
+  const onVis = () => document.visibilityState === "visible" && refreshAccount();
+  document.addEventListener("visibilitychange", onVis);
+  return () => {
+    accountListeners.delete(fn);
+    sub?.subscription.unsubscribe();
+    document.removeEventListener("visibilitychange", onVis);
+  };
+}
+
+/** Тягне свіжі дані користувача з сервера (email міг підтвердитись в іншій вкладці / браузері). */
+export async function refreshAccount(): Promise<Account | null> {
+  if (!supabase) return null;
+  const { data } = await supabase.auth.getUser();
+  let user = data.user;
+  // Токен ще «анонімний», а на сервері email уже прив'язано — оновлюємо сесію.
+  if (user && user.email && user.is_anonymous) {
+    const r = await supabase.auth.refreshSession();
+    user = r.data.user ?? user;
+  }
+  emitAccount(user);
+  return toAccount(user);
 }
 const emitAccount = (u: User | null | undefined) => accountListeners.forEach((f) => f(toAccount(u)));
 
@@ -163,7 +184,16 @@ export async function verifyCode(email: string, input: string, mode: CodeMode) {
     res = await supabase.auth.verifyOtp({ email, token: raw, type: mode === "link" ? "email_change" : "email" });
   }
   const { data, error } = res;
-  if (error) throw new Error(authErr(error));
+  if (error) {
+    // Посилання вже використали (натиснули в іншому браузері) — але email міг уже прив'язатися.
+    const acc = await refreshAccount();
+    if (acc?.email && acc.email.toLowerCase() === email.toLowerCase()) return;
+    throw new Error(
+      /^https?:/.test(raw)
+        ? "Посилання вже використане або застаріло. Якщо натискав його — перевір вхід: відкрий профіль ще раз. Інакше надішли новий лист."
+        : authErr(error),
+    );
+  }
   userId = data.user?.id ?? userId;
   emitAccount(data.user);
   statusCb("syncing");
