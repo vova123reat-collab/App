@@ -74,8 +74,11 @@ const ls = {
 };
 const getOwner = () => ls.get(OWNER_KEY);
 const setOwner = (id: string) => ls.set(OWNER_KEY, id);
-const getSyncedAt = () => Number(ls.get(SYNCED_KEY)) || 0;
-const setSyncedAt = (t: number) => ls.set(SYNCED_KEY, String(t));
+// Версію тримаємо в пам'яті кожної вкладки (вкладки ділять localStorage, але не стан у пам'яті),
+// а в localStorage — лише щоб пережити перезапуск.
+let syncedAtMem: number | null = null;
+const getSyncedAt = () => (syncedAtMem ??= Number(ls.get(SYNCED_KEY)) || 0);
+const setSyncedAt = (t: number) => { syncedAtMem = t; ls.set(SYNCED_KEY, String(t)); };
 const isDirty = () => snapshot().updatedAt > getSyncedAt();
 
 let channel: ReturnType<SupabaseClient["channel"]> | null = null;
