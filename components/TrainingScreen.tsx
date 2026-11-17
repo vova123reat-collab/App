@@ -2,9 +2,10 @@
 import { useEffect, useState } from "react";
 import { Card, Label } from "./ui";
 import { ProgressSection } from "./ProgressSection";
+import { blankPlan, PlanEditor } from "./PlanEditor";
 import { useGame } from "@/lib/store";
 import {
-  ACTIVITY_LEVELS, e1rm, EQUIPMENT, GOALS, lastResult, LEVELS, TrainingAnswers, volume, WorkoutLog,
+  ACTIVITY_LEVELS, e1rm, EQUIPMENT, GOALS, lastResult, LEVELS, planWeekdays, TrainingAnswers, TrainingPlan, volume, WEEKDAYS, WorkoutLog,
 } from "@/lib/training";
 import { fmtClock, kcalGoal, proteinGoal } from "@/lib/game";
 
@@ -31,7 +32,7 @@ function Num({ label, value, onChange, step = 1 }: { label: string; value?: numb
   );
 }
 
-function Questionnaire({ onDone, onCancel }: { onDone: () => void; onCancel?: () => void }) {
+function Questionnaire({ onDone, onCancel, onManual }: { onDone: () => void; onCancel?: () => void; onManual: () => void }) {
   const { profile, training, setTrainingAnswers, setPlan } = useGame();
   const [a, setA] = useState<TrainingAnswers>(() => training.answers ?? {
     sex: "m", age: 25, heightCm: 178, weightKg: profile.weightKg, goal: "recomp", level: "beginner",
@@ -92,6 +93,7 @@ function Questionnaire({ onDone, onCancel }: { onDone: () => void; onCancel?: ()
       <button className="btn btn-primary w-full" onClick={generate} disabled={busy}>
         {busy ? "ШІ складає план… (до 1 хв)" : "✦ СКЛАСТИ ПЛАН"}
       </button>
+      <button className="btn w-full text-xs" onClick={onManual} disabled={busy}>✎ Скласти план вручну</button>
       {err && <div className="text-xs text-hp">{err}</div>}
       <div className="text-[10px] text-mute">
         План складається за науковим консенсусом (ISSN, Schoenfeld, Morton та ін.), але це не медична порада.
@@ -210,13 +212,8 @@ function WorkoutMode({ onFinished }: { onFinished: (l: WorkoutLog | null) => voi
 
 // ───────────── План ─────────────
 
-const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"];
-/** Рекомендовані дні тижня (індекси Пн=0) з відпочинком між тренуваннями. */
-const SCHEDULES: Record<number, number[]> = {
-  1: [0], 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 4, 5], 6: [0, 1, 2, 3, 4, 5], 7: [0, 1, 2, 3, 4, 5, 6],
-};
 
-function PlanView({ onEdit }: { onEdit: () => void }) {
+function PlanView({ onEdit, onEditPlan }: { onEdit: () => void; onEditPlan: () => void }) {
   const { training, profile, startWorkout, applyPlanNutrition, deleteWorkoutLog } = useGame();
   const plan = training.plan!;
   const n = plan.nutrition;
@@ -227,7 +224,7 @@ function PlanView({ onEdit }: { onEdit: () => void }) {
   // Наступний день по колу після останнього виконаного.
   const lastIdx = plan.days.findIndex((d) => d.name === training.logs[0]?.dayName);
   const next = (lastIdx + 1) % plan.days.length;
-  const schedule = SCHEDULES[Math.min(7, plan.days.length)] ?? SCHEDULES[3];
+  const schedule = planWeekdays(plan.days);
 
   return (
     <div className="space-y-3">
@@ -245,7 +242,7 @@ function PlanView({ onEdit }: { onEdit: () => void }) {
             </div>
           ))}
         </div>
-        <div className="text-[11px] text-mute">Вода: {n.waterMl} мл · {plan.weeklyRateNote}</div>
+        <div className="text-[11px] text-mute">Вода: {n.waterMl} мл{plan.weeklyRateNote ? ` · ${plan.weeklyRateNote}` : ""}</div>
         <details className="text-[11px] text-mute"><summary className="cursor-pointer">як пораховано</summary><div className="mt-1">{n.rationale}</div></details>
         <button className={`btn w-full text-xs ${applied ? "text-xp" : "btn-primary"}`} onClick={applyPlanNutrition}>
           {applied ? "✓ Цілі «Палива» оновлено" : "ЗАСТОСУВАТИ ДО «ПАЛИВА»"}
@@ -254,7 +251,10 @@ function PlanView({ onEdit }: { onEdit: () => void }) {
 
       <div className="flex items-center justify-between">
         <Label>План на тиждень · {plan.days.length} тренування</Label>
-        <button className="text-[11px] text-mute underline" onClick={onEdit}>змінити анкету</button>
+        <div className="flex gap-3">
+          <button className="text-[11px] text-ink underline" onClick={onEditPlan}>✎ редагувати</button>
+          <button className="text-[11px] text-mute underline" onClick={onEdit}>✦ новий від ШІ</button>
+        </div>
       </div>
 
       {/* Смужка тижня: які дні тренування, які — відпочинок */}
@@ -307,13 +307,13 @@ function PlanView({ onEdit }: { onEdit: () => void }) {
         </button>
         {more && (
           <>
-            <ul className="list-disc pl-4 space-y-1">{plan.principles.map((p, i) => <li key={i}>{p}</li>)}</ul>
+            {plan.principles.length > 0 && <ul className="list-disc pl-4 space-y-1">{plan.principles.map((p, i) => <li key={i}>{p}</li>)}</ul>}
             <div><b>Прогресія:</b> {plan.progression}</div>
             <div><b>Розвантаження:</b> {plan.deload}</div>
-            <div className="text-mute">
+            {plan.references.length > 0 && <div className="text-mute">
               <b>Джерела:</b>
               <ul className="list-disc pl-4">{plan.references.map((r, i) => <li key={i}>{r}</li>)}</ul>
-            </div>
+            </div>}
           </>
         )}
       </Card>
@@ -344,14 +344,17 @@ function PlanView({ onEdit }: { onEdit: () => void }) {
 
 export function TrainingScreen() {
   const training = useGame((s) => s.training);
-  const [editing, setEditing] = useState(false);
+  const profile = useGame((s) => s.profile);
+  const [mode, setMode] = useState<"view" | "ai" | "edit">("view");
+  const [draft, setDraft] = useState<TrainingPlan | null>(null);
   const [result, setResult] = useState<WorkoutLog | null>(null);
+  const openEditor = (p: TrainingPlan) => { setDraft(p); setMode("edit"); };
 
   return (
     <div className="space-y-3">
       <div>
         <div className="text-lg font-bold">Силові тренування</div>
-        <div className="text-xs text-mute">План від ШІ на основі досліджень · кожне тренування качає Силу</div>
+        <div className="text-xs text-mute">План від ШІ або власний · кожне тренування качає Силу</div>
       </div>
       {result && !training.active && (
         <Card className="space-y-1 text-center border-xp/50">
@@ -363,12 +366,15 @@ export function TrainingScreen() {
       )}
       {training.active && training.plan ? (
         <WorkoutMode onFinished={setResult} />
-      ) : !training.plan || editing ? (
-        <Questionnaire onDone={() => setEditing(false)} onCancel={training.plan ? () => setEditing(false) : undefined} />
+      ) : mode === "edit" && draft ? (
+        <PlanEditor initial={draft} onClose={() => { setMode("view"); setDraft(null); }} />
+      ) : !training.plan || mode === "ai" ? (
+        <Questionnaire onDone={() => setMode("view")} onCancel={training.plan ? () => setMode("view") : undefined}
+          onManual={() => openEditor(blankPlan(profile))} />
       ) : (
-        <PlanView onEdit={() => setEditing(true)} />
+        <PlanView onEdit={() => setMode("ai")} onEditPlan={() => openEditor(training.plan!)} />
       )}
-      {!training.active && <ProgressSection />}
+      {!training.active && mode !== "edit" && <ProgressSection />}
     </div>
   );
 }
