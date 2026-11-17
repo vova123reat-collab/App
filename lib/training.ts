@@ -101,6 +101,7 @@ export interface WorkoutLog {
 }
 
 export interface TrainingState {
+  bodyWeights?: Record<string, number>; // YYYY-MM-DD → кг
   answers?: TrainingAnswers;
   plan?: TrainingPlan;
   logs: WorkoutLog[];
@@ -131,3 +132,54 @@ export const e1rm = (w: number, r: number) => (r <= 1 ? w : Math.round(w * (1 + 
 
 /** XP за тренування: хвилини + бонус за кожен виконаний робочий підхід. */
 export const workoutXp = (minutes: number, doneSets: number) => Math.round(minutes * 0.8 + doneSets * 2);
+
+// ───────────── Прогрес ─────────────
+
+export interface Point { date: string; y: number; label?: string }
+
+/** Найкращий результат (оцінка 1ПМ) у вправі за кожне тренування, від старих до нових. */
+export function exerciseSeries(logs: WorkoutLog[], exercise: string): Point[] {
+  const key = exercise.trim().toLowerCase();
+  const byDate = new Map<string, Point>();
+  for (const l of [...logs].reverse()) {
+    const e = l.exercises.find((x) => x.name.trim().toLowerCase() === key);
+    if (!e) continue;
+    const loaded = e.sets.filter((s) => s.weight > 0);
+    if (!loaded.length) continue;
+    const best = loaded.reduce((a, s) => (e1rm(s.weight, s.reps) > e1rm(a.weight, a.reps) ? s : a));
+    const p = { date: l.date, y: e1rm(best.weight, best.reps), label: `${best.weight} кг × ${best.reps}` };
+    const prev = byDate.get(l.date);
+    if (!prev || p.y > prev.y) byDate.set(l.date, p);
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Вправи з вагою, які є в журналі (за кількістю тренувань). */
+export function trackedExercises(logs: WorkoutLog[]) {
+  const count = new Map<string, number>();
+  for (const l of logs) for (const e of l.exercises) if (e.sets.some((s) => s.weight > 0)) count.set(e.name, (count.get(e.name) ?? 0) + 1);
+  return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+}
+
+const dayNum = (iso: string) => Date.parse(iso + "T12:00:00Z") / 86_400_000;
+
+/** Тренд ваги: середнє за 7 днів до кожної точки (згладжує коливання води). */
+export function weightTrend(points: Point[]): Point[] {
+  return points.map((p) => {
+    const win = points.filter((q) => dayNum(q.date) <= dayNum(p.date) && dayNum(q.date) > dayNum(p.date) - 7);
+    return { date: p.date, y: Math.round((win.reduce((a, q) => a + q.y, 0) / win.length) * 10) / 10 };
+  });
+}
+
+/** Темп зміни ваги, кг/тиждень (лінійна регресія по тренду за останні 28 днів). */
+export function weeklyRate(trend: Point[]): number | null {
+  if (trend.length < 2) return null;
+  const last = dayNum(trend[trend.length - 1].date);
+  const pts = trend.filter((p) => dayNum(p.date) > last - 28);
+  if (pts.length < 2 || dayNum(pts[pts.length - 1].date) - dayNum(pts[0].date) < 6) return null;
+  const xs = pts.map((p) => dayNum(p.date)), ys = pts.map((p) => p.y);
+  const mx = xs.reduce((a, b) => a + b) / xs.length, my = ys.reduce((a, b) => a + b) / ys.length;
+  const num = xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0);
+  const den = xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+  return den ? Math.round((num / den) * 7 * 100) / 100 : null;
+}

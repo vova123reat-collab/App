@@ -53,6 +53,8 @@ interface Actions {
   finishWorkout: () => WorkoutLog | null;
   cancelWorkout: () => void;
   deleteWorkoutLog: (id: string) => void;
+  logBodyWeight: (kg: number, date?: string) => void;
+  removeBodyWeight: (date: string) => void;
 }
 
 export const initialState = (): GameState => ({
@@ -316,6 +318,23 @@ export const useGame = create<GameState & Actions>()(
             xp: { ...get().xp, str: get().xp.str + xp },
           }));
           return log;
+        },
+
+        logBodyWeight: (kg, date = today()) => {
+          const t = get().training;
+          const bodyWeights = { ...(t.bodyWeights ?? {}), [date]: Math.round(kg * 10) / 10 };
+          const latest = Object.keys(bodyWeights).sort().pop()!;
+          set(touch({
+            training: { ...t, bodyWeights },
+            profile: { ...get().profile, weightKg: bodyWeights[latest] }, // цілі білка/води рахуються від свіжої ваги
+          }));
+        },
+
+        removeBodyWeight: (date) => {
+          const t = get().training;
+          const bodyWeights = { ...(t.bodyWeights ?? {}) };
+          delete bodyWeights[date];
+          set(touch({ training: { ...t, bodyWeights } }));
         },
 
         deleteWorkoutLog: (id) => set(touch({ training: { ...get().training, logs: get().training.logs.filter((l) => l.id !== id) } })),

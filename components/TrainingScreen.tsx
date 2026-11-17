@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Card, Label } from "./ui";
+import { ProgressSection } from "./ProgressSection";
 import { useGame } from "@/lib/store";
 import {
   ACTIVITY_LEVELS, e1rm, EQUIPMENT, GOALS, lastResult, LEVELS, TrainingAnswers, volume, WorkoutLog,
@@ -339,6 +340,7 @@ export function TrainingScreen() {
       ) : (
         <PlanView onEdit={() => setEditing(true)} />
       )}
+      {!training.active && <ProgressSection />}
     </div>
   );
 }
