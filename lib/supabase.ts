@@ -93,7 +93,8 @@ async function reconcile(preferRemote: boolean) {
   const local = snapshot();
   const remote = await fetchRemote();
   // Локальні дані належать іншому акаунту (або ще нікому) → акаунт важливіший.
-  const foreign = !!getOwner() && getOwner() !== userId;
+  // Немає власника (свіжий браузер) теж рахується «чужим»: порожній пристрій не має перезаписати акаунт.
+  const foreign = getOwner() !== userId;
   if (remote && (preferRemote || foreign || remote.updatedAt > local.updatedAt)) applyRemote(remote);
   else await push(local);
   if (userId) setOwner(userId);
@@ -213,4 +214,39 @@ export async function signOut() {
   useGame.getState().replaceAll(initialState());
   applyingRemote = false;
   await startSync(statusCb);
+}
+
+// ───────────── Код підключення пристрою (без листів) ─────────────
+
+/** На пристрої, де вже є вхід: створює одноразовий код на 10 хв. */
+export async function createPairCode(): Promise<{ code: string; expiresAt: string }> {
+  if (!supabase) throw new Error("Supabase не налаштовано");
+  const { data } = await supabase.auth.getSession();
+  const r = await fetch("/api/pair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${data.session?.access_token ?? ""}` },
+    body: JSON.stringify({ action: "create" }),
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || "Помилка");
+  return j;
+}
+
+/** На новому пристрої: вводимо код → входимо в акаунт і беремо його прогрес. */
+export async function redeemPairCode(code: string) {
+  if (!supabase) throw new Error("Supabase не налаштовано");
+  const r = await fetch("/api/pair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "redeem", code }),
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || "Помилка");
+  const { data, error } = await supabase.auth.verifyOtp({ token_hash: j.token_hash, type: "magiclink" });
+  if (error) throw new Error(authErr(error));
+  userId = data.user?.id ?? userId;
+  emitAccount(data.user);
+  statusCb("syncing");
+  await reconcile(true);
+  statusCb("synced");
 }

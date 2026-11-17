@@ -42,3 +42,12 @@ create policy "own sessions" on public.focus_sessions
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create index if not exists focus_sessions_user_day on public.focus_sessions(user_id, day);
+
+-- Одноразові коди «підключити інший пристрій». RLS без політик: доступ лише через service role на сервері.
+create table if not exists public.pair_codes (
+  code       text primary key,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  expires_at timestamptz not null
+);
+alter table public.pair_codes enable row level security;
+create index if not exists pair_codes_user on public.pair_codes(user_id);
