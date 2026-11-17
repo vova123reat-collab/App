@@ -143,8 +143,8 @@ function WorkoutMode({ onFinished }: { onFinished: (l: WorkoutLog | null) => voi
     <div className="space-y-3 pb-16">
       <Card className="flex items-center justify-between">
         <div>
-          <b>{day.name}</b>
-          <div className="text-[11px] text-mute">{day.focus}</div>
+          <b>День {active.dayIndex + 1}</b>
+          <div className="text-[11px] text-mute">{day.exercises.length} вправ</div>
         </div>
         <div className="text-right">
           <div className="text-xl font-bold tabular-nums">{fmtClock(now - active.startedAt)}</div>
@@ -210,6 +210,12 @@ function WorkoutMode({ onFinished }: { onFinished: (l: WorkoutLog | null) => voi
 
 // ───────────── План ─────────────
 
+const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"];
+/** Рекомендовані дні тижня (індекси Пн=0) з відпочинком між тренуваннями. */
+const SCHEDULES: Record<number, number[]> = {
+  1: [0], 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 4, 5], 6: [0, 1, 2, 3, 4, 5], 7: [0, 1, 2, 3, 4, 5, 6],
+};
+
 function PlanView({ onEdit }: { onEdit: () => void }) {
   const { training, profile, startWorkout, applyPlanNutrition, deleteWorkoutLog } = useGame();
   const plan = training.plan!;
@@ -221,6 +227,7 @@ function PlanView({ onEdit }: { onEdit: () => void }) {
   // Наступний день по колу після останнього виконаного.
   const lastIdx = plan.days.findIndex((d) => d.name === training.logs[0]?.dayName);
   const next = (lastIdx + 1) % plan.days.length;
+  const schedule = SCHEDULES[Math.min(7, plan.days.length)] ?? SCHEDULES[3];
 
   return (
     <div className="space-y-3">
@@ -246,30 +253,51 @@ function PlanView({ onEdit }: { onEdit: () => void }) {
       </Card>
 
       <div className="flex items-center justify-between">
-        <Label>Тренування · {plan.days.length} на тиждень</Label>
+        <Label>План на тиждень · {plan.days.length} тренування</Label>
         <button className="text-[11px] text-mute underline" onClick={onEdit}>змінити анкету</button>
+      </div>
+
+      {/* Смужка тижня: які дні тренування, які — відпочинок */}
+      <div className="grid grid-cols-7 gap-1 text-center">
+        {WEEKDAYS.map((wd, k) => {
+          const di = schedule.indexOf(k);
+          return (
+            <div key={wd} className={`rounded-md border py-1.5 ${di >= 0 ? (di === next ? "border-xp/60 bg-xp/10" : "border-line bg-card") : "border-transparent"}`}>
+              <div className="text-[10px] text-mute">{wd}</div>
+              <div className={`text-xs font-bold ${di >= 0 ? "" : "text-mute font-normal"}`}>{di >= 0 ? `Д${di + 1}` : "—"}</div>
+            </div>
+          );
+        })}
       </div>
 
       {plan.days.map((d, i) => (
         <Card key={i} className={i === next ? "border-xp/50" : ""}>
-          <button className="w-full text-left" onClick={() => setOpen(open === i ? null : i)}>
-            <div className="flex items-baseline justify-between gap-2">
-              <b className="text-sm">{d.name}</b>
-              {i === next && <span className="text-[10px] text-xp">наступне</span>}
-            </div>
-            <div className="text-[11px] text-mute">{d.focus} · {d.exercises.length} вправ</div>
-          </button>
-          {open === i && (
-            <ul className="mt-2 divide-y divide-line text-xs">
-              {d.exercises.map((e, j) => (
-                <li key={j} className="py-1.5">
-                  <div className="flex justify-between gap-2"><span>{e.name}</span><span className="shrink-0 text-mute">{e.sets}×{e.reps}</span></div>
-                  <div className="text-[10px] text-mute">RIR {e.rir} · відпочинок {Math.round(e.restSec / 60 * 10) / 10} хв{e.notes ? ` · ${e.notes}` : ""}</div>
-                </li>
-              ))}
-            </ul>
-          )}
-          <button className={`btn mt-2 w-full ${i === next ? "btn-primary" : ""}`} onClick={() => startWorkout(i)}>▶ ПОЧАТИ</button>
+          <div className="flex items-baseline justify-between gap-2">
+            <b>День {i + 1} <span className="text-mute font-normal">· {WEEKDAYS[schedule[i]]}</span></b>
+            {i === next ? <span className="text-[10px] text-xp">наступне</span> : <span className="text-[10px] text-mute">{d.exercises.length} вправ</span>}
+          </div>
+          <ol className="mt-2 space-y-1.5 text-sm">
+            {d.exercises.map((e, j) => (
+              <li key={j} className="flex gap-2">
+                <span className="w-4 shrink-0 text-right text-mute tabular-nums">{j + 1}.</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between gap-2">
+                    <span>{e.name}</span>
+                    <span className="shrink-0 tabular-nums text-mute">{e.sets}×{e.reps}</span>
+                  </div>
+                  {open === i && (
+                    <div className="text-[10px] text-mute">
+                      RIR {e.rir} · відпочинок {Math.round((e.restSec / 60) * 10) / 10} хв{e.notes ? ` · ${e.notes}` : ""}
+                    </div>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-2 flex gap-2">
+            <button className="btn text-xs" onClick={() => setOpen(open === i ? null : i)}>{open === i ? "сховати" : "деталі"}</button>
+            <button className={`btn flex-1 ${i === next ? "btn-primary" : ""}`} onClick={() => startWorkout(i)}>▶ ПОЧАТИ</button>
+          </div>
         </Card>
       ))}
 
@@ -301,7 +329,7 @@ function PlanView({ onEdit }: { onEdit: () => void }) {
               return (
                 <li key={l.id} className="flex items-center gap-2 py-1.5">
                   <span className="text-mute w-12">{l.date.slice(5)}</span>
-                  <span className="flex-1 truncate">{l.dayName}{top?.best ? ` · ${top.name} ≈1ПМ ${top.best} кг` : ""}</span>
+                  <span className="flex-1 truncate">{(() => { const k = plan.days.findIndex((d) => d.name === l.dayName); return k >= 0 ? `День ${k + 1}` : l.dayName; })()}{top?.best ? ` · ${top.name} ≈1ПМ ${top.best} кг` : ""}</span>
                   <span className="text-[#fb923c]">+{l.xp}</span>
                   <button className="text-mute" onClick={() => confirm("Видалити запис?") && deleteWorkoutLog(l.id)}>✕</button>
                 </li>
