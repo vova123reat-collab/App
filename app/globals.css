@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #050505;
+  --color-card: #0f0f0f;
+  --color-card-2: #161616;
+  --color-line: #2a2a2a;
+  --color-ink: #ececec;
+  --color-mute: #8b8b8b;
+  --color-xp: #4ade80;
+  --color-hp: #ef4444;
+  --color-protein: #ef4444;
+  --color-water: #38bdf8;
+  --color-buff: #facc15;
+  --font-mono: var(--font-jet), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html, body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Сегментована шкала як у референсі */
+.seg {
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 6px, transparent 6px 8px);
+  mask: repeating-linear-gradient(90deg, #000 0 6px, transparent 6px 8px);
+}
+
+.card {
+  background: var(--color-card);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+}
+
+.btn {
+  border: 1px solid var(--color-line);
+  background: var(--color-card-2);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  transition: background 0.15s, transform 0.05s;
+}
+.btn:active { transform: scale(0.96); background: #222; }
+.btn-primary { border-color: #555; background: #1d1d1d; font-weight: 700; letter-spacing: 0.08em; }
+
+input, select, textarea {
+  background: #0a0a0a;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--color-ink);
+  outline: none;
+  width: 100%;
+}
+input:focus, select:focus, textarea:focus { border-color: #555; }
+
+.link { text-decoration: underline; text-underline-offset: 3px; color: var(--color-mute); }
