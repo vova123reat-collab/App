@@ -2,40 +2,33 @@ import "server-only";
 import { GoogleGenAI, Schema } from "@google/genai";
 
 export const DEFAULT_MODEL = "gemini-3.8-flash";
+/** Якщо модель знято (404) або перевантажено (503/429) — пробуємо наступну. */
+const FALLBACKS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite"];
 
-/** Генерує JSON за схемою; якщо модель з env знято — пробує модель за замовчуванням. */
+/** Генерує JSON за схемою з ланцюжком запасних моделей. */
 export async function generateJson<T>(prompt: string, schema: Schema, temperature = 0.4): Promise<T> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw Object.assign(new Error("GEMINI_API_KEY не задано"), { status: 503 });
 
-  const ai = new GoogleGenAI({ apiKey });
-  const once = (model: string) =>
-    ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: { responseMimeType: "application/json", responseSchema: schema, temperature },
-    });
-  // 503 / 429 «модель перевантажена» — зазвичай минає за секунду-дві.
-  const call = async (model: string) => {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await once(model);
-      } catch (e) {
-        const st = (e as { status?: number }).status;
-        if ((st !== 503 && st !== 429) || attempt >= 2) throw e;
-        await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
-      }
-    }
-  };
+  const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 25_000 } });
+  const models = Array.from(new Set([process.env.GEMINI_MODEL || DEFAULT_MODEL, ...FALLBACKS]));
 
-  const wanted = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-  let res;
-  try {
-    res = await call(wanted);
-  } catch (e) {
-    if ((e as { status?: number }).status !== 404 || wanted === DEFAULT_MODEL) throw e;
-    console.warn(`[gemini] model ${wanted} unavailable, falling back to ${DEFAULT_MODEL}`);
-    res = await call(DEFAULT_MODEL);
+  let lastErr: unknown;
+  for (const model of models) {
+    try {
+      const res = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: "application/json", responseSchema: schema, temperature },
+      });
+      return JSON.parse(res.text ?? "{}") as T;
+    } catch (e) {
+      lastErr = e;
+      const st = (e as { status?: number }).status;
+      const retryable = st === undefined || st === 404 || st === 429 || st === 500 || st === 503 || st === 504;
+      if (!retryable) throw e;
+      console.warn(`[gemini] ${model} failed (${st ?? "timeout"}), trying next`);
+    }
   }
-  return JSON.parse(res.text ?? "{}") as T;
+  throw lastErr;
 }
