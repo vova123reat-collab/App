@@ -51,3 +51,10 @@ create table if not exists public.pair_codes (
 );
 alter table public.pair_codes enable row level security;
 create index if not exists pair_codes_user on public.pair_codes(user_id);
+
+-- Живі оновлення між пристроями (Supabase Realtime; RLS діє і тут).
+do $$ begin
+  if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='player_state') then
+    alter publication supabase_realtime add table public.player_state;
+  end if;
+end $$;

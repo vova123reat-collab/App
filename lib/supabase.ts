@@ -2,6 +2,7 @@
 import { createClient, EmailOtpType, SupabaseClient, User } from "@supabase/supabase-js";
 import { GameState, initialState, snapshot, useGame } from "./store";
 import { Session } from "./game";
+import { mergeStates } from "./merge";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -60,12 +61,39 @@ async function ensureUser() {
   return anon.user;
 }
 
+// ───────────── Синхронізація ─────────────
+// Модель: офлайн-перший документ на користувача. Кожен пристрій пам'ятає syncedAt —
+// версію (updatedAt), яку востаннє бачив на сервері. Якщо сервер новіший і локально
+// теж є незбережені зміни — стани зливаються (lib/merge.ts), а не перезаписуються.
+
+const OWNER_KEY = "rl-rpg-owner";
+const SYNCED_KEY = "rl-rpg-synced";
+const ls = {
+  get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch {} },
+};
+const getOwner = () => ls.get(OWNER_KEY);
+const setOwner = (id: string) => ls.set(OWNER_KEY, id);
+const getSyncedAt = () => Number(ls.get(SYNCED_KEY)) || 0;
+const setSyncedAt = (t: number) => ls.set(SYNCED_KEY, String(t));
+const isDirty = () => snapshot().updatedAt > getSyncedAt();
+
+let channel: ReturnType<SupabaseClient["channel"]> | null = null;
+let queue: Promise<unknown> = Promise.resolve();
+/** Усі мережеві операції синхронізації — по черзі, щоб не було гонок. */
+const serial = <T,>(fn: () => Promise<T>) => {
+  const p = queue.then(fn, fn);
+  queue = p.catch(() => {});
+  return p;
+};
+
 async function push(state: GameState) {
   if (!supabase || !userId) return;
   const { error } = await supabase
     .from("player_state")
     .upsert({ user_id: userId, state, updated_at: new Date(state.updatedAt).toISOString() });
   if (error) throw error;
+  setSyncedAt(state.updatedAt);
 }
 
 async function fetchRemote(): Promise<GameState | null> {
@@ -81,23 +109,67 @@ function applyRemote(remote: GameState) {
   applyingRemote = false;
 }
 
-/**
- * Узгоджує локальний і віддалений стан.
- * preferRemote — щойно увійшли в існуючий акаунт: його прогрес важливіший за свіжий пристрій.
- */
-const OWNER_KEY = "rl-rpg-owner";
-const getOwner = () => { try { return localStorage.getItem(OWNER_KEY); } catch { return null; } };
-const setOwner = (id: string) => { try { localStorage.setItem(OWNER_KEY, id); } catch {} };
+/** Приймає стан із сервера: замінює, якщо локально нічого не змінено, інакше зливає і пушить. */
+async function absorb(remote: GameState) {
+  if (remote.updatedAt <= getSyncedAt()) return; // уже бачили (або це наш власний запис)
+  if (!isDirty()) {
+    applyRemote(remote);
+    setSyncedAt(remote.updatedAt);
+    return;
+  }
+  const merged = mergeStates(snapshot(), remote);
+  applyRemote(merged);
+  await push(merged);
+}
 
+/** Тягне сервер і узгоджує (при поверненні в програму, раз на хвилину, після Realtime-сигналу). */
+export function pullNow() {
+  if (!supabase || !userId) return Promise.resolve();
+  return serial(async () => {
+    statusCb("syncing");
+    try {
+      const remote = await fetchRemote();
+      if (remote) await absorb(remote);
+      if (isDirty()) await push(snapshot());
+      statusCb("synced");
+    } catch (e) {
+      console.error("[sync:pull]", e);
+      statusCb("error");
+    }
+  });
+}
+
+/**
+ * Узгоджує стан після входу.
+ * preferRemote / «чужий» пристрій — прогрес акаунта важливіший за те, що лежить локально.
+ */
 async function reconcile(preferRemote: boolean) {
-  const local = snapshot();
   const remote = await fetchRemote();
-  // Локальні дані належать іншому акаунту (або ще нікому) → акаунт важливіший.
-  // Немає власника (свіжий браузер) теж рахується «чужим»: порожній пристрій не має перезаписати акаунт.
   const foreign = getOwner() !== userId;
-  if (remote && (preferRemote || foreign || remote.updatedAt > local.updatedAt)) applyRemote(remote);
-  else await push(local);
+  if (preferRemote || foreign) {
+    if (remote) { applyRemote(remote); setSyncedAt(remote.updatedAt); }
+    else await push(snapshot());
+  } else {
+    if (remote) await absorb(remote);
+    if (isDirty() || !remote) await push(snapshot());
+  }
   if (userId) setOwner(userId);
+  listenRealtime();
+}
+
+/** Живі оновлення: інший пристрій записав — підтягуємо одразу. */
+function listenRealtime() {
+  if (!supabase || !userId) return;
+  if (channel) supabase.removeChannel(channel);
+  const uid = userId;
+  channel = supabase
+    .channel(`player_state:${uid}`)
+    .on("postgres_changes", { event: "*", schema: "public", table: "player_state", filter: `user_id=eq.${uid}` },
+      (payload) => {
+        const st = (payload.new as { state?: GameState } | null)?.state;
+        if (st && st.updatedAt > getSyncedAt()) pullNow();
+      })
+    .subscribe();
 }
 
 function subscribeOnce() {
@@ -107,10 +179,15 @@ function subscribeOnce() {
     if (applyingRemote || !userId) return;
     if (pushTimer) clearTimeout(pushTimer);
     pushTimer = setTimeout(() => {
-      statusCb("syncing");
-      push(snapshot()).then(() => statusCb("synced")).catch(() => statusCb("error"));
-    }, 1500);
+      // Перед записом перевіряємо, чи не змінив хтось сервер — тоді зливаємо.
+      pullNow();
+    }, 1200);
   });
+  const onVis = () => { if (document.visibilityState === "visible") pullNow(); };
+  document.addEventListener("visibilitychange", onVis);
+  window.addEventListener("focus", onVis);
+  window.addEventListener("online", onVis);
+  setInterval(() => { if (document.visibilityState === "visible") pullNow(); }, 60_000);
 }
 
 /** Підключає синхронізацію: тягне віддалений стан, далі пушить зміни з дебаунсом. */
@@ -123,7 +200,7 @@ export async function startSync(onStatus: (s: SyncStatus) => void) {
     userId = user?.id ?? null;
     emitAccount(user);
     if (!userId) return onStatus("error");
-    await reconcile(false);
+    await serial(() => reconcile(false));
     onStatus("synced");
     subscribeOnce();
   } catch (e) {
@@ -198,8 +275,8 @@ export async function verifyCode(email: string, input: string, mode: CodeMode) {
   userId = data.user?.id ?? userId;
   emitAccount(data.user);
   statusCb("syncing");
-  // link: той самий акаунт → просто пушимо; login: беремо прогрес з акаунта.
-  await reconcile(mode === "login");
+  // link: той самий акаунт → зливаємо як завжди; login: беремо прогрес з акаунта.
+  await serial(() => reconcile(mode === "login"));
   statusCb("synced");
 }
 
@@ -208,7 +285,9 @@ export async function signOut() {
   if (pushTimer) clearTimeout(pushTimer);
   await push(snapshot()).catch(() => {});
   await supabase.auth.signOut();
+  if (channel) { supabase.removeChannel(channel); channel = null; }
   userId = null;
+  setSyncedAt(0);
   // Чистий локальний стан + новий анонімний гість, щоб наступний гравець не бачив чужих даних.
   applyingRemote = true;
   useGame.getState().replaceAll(initialState());
@@ -247,6 +326,6 @@ export async function redeemPairCode(code: string) {
   userId = data.user?.id ?? userId;
   emitAccount(data.user);
   statusCb("syncing");
-  await reconcile(true);
+  await serial(() => reconcile(true));
   statusCb("synced");
 }

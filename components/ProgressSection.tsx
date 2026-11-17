@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Card, Label } from "./ui";
 import { LineChart } from "./LineChart";
 import { useGame } from "@/lib/store";
-import { exerciseSeries, Point, trackedExercises, weeklyRate, weightTrend } from "@/lib/training";
+import { exerciseSeries, Point, repsSeries, statsExercises, weeklyRate, weightTrend } from "@/lib/training";
 
 const ddmm = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
 const WEIGHT = "#38bdf8";
@@ -101,45 +101,81 @@ function BodyWeightCard() {
 
 function StrengthCard() {
   const logs = useGame((s) => s.training.logs);
-  const names = useMemo(() => trackedExercises(logs), [logs]);
+  const plan = useGame((s) => s.training.plan);
+  const list = useMemo(() => statsExercises(plan, logs), [plan, logs]);
   const [sel, setSel] = useState<string | null>(null);
-  const ex = sel && names.includes(sel) ? sel : names[0];
-  const pts = useMemo(() => (ex ? exerciseSeries(logs, ex) : []), [logs, ex]);
+  const [dayFilter, setDayFilter] = useState<number | "all">("all");
 
-  if (!names.length) {
+  const withData = useMemo(() => {
+    const m = new Map<string, { kind: "kg" | "reps"; pts: Point[] }>();
+    for (const x of list) {
+      const kg = exerciseSeries(logs, x.name);
+      m.set(x.name, kg.length ? { kind: "kg", pts: kg } : { kind: "reps", pts: repsSeries(logs, x.name) });
+    }
+    return m;
+  }, [list, logs]);
+
+  if (!list.length) {
     return (
       <Card>
         <b className="text-sm">Сила у вправах</b>
-        <div className="mt-1 text-[11px] text-mute">Заверши тренування з вагою — тут з'явиться графік прогресу по кожній вправі.</div>
+        <div className="mt-1 text-[11px] text-mute">Додай план або заверши тренування — тут з'являться всі вправи.</div>
       </Card>
     );
   }
 
+  const days = Array.from(new Set(list.map((x) => x.day).filter((d): d is number => !!d)));
+  const shown = list.filter((x) => dayFilter === "all" || x.day === dayFilter);
+  const ex = sel && list.some((x) => x.name === sel) ? sel : (shown.find((x) => withData.get(x.name)!.pts.length) ?? shown[0] ?? list[0]).name;
+  const data = withData.get(ex)!;
+  const pts = data.pts;
+  const unit = data.kind === "kg" ? "кг" : "повт.";
   const first = pts[0], last = pts[pts.length - 1];
   const gain = first && last && first.y ? Math.round(((last.y - first.y) / first.y) * 1000) / 10 : 0;
-  const pr = pts.reduce((a, p) => (p.y > a.y ? p : a), pts[0]);
+  const pr = pts.length ? pts.reduce((a, p) => (p.y > a.y ? p : a), pts[0]) : null;
 
   return (
     <Card className="space-y-2">
       <div className="flex items-baseline justify-between">
         <b className="text-sm">Сила у вправах</b>
-        <span className="text-[11px] text-mute">оцінка 1ПМ (Еплі)</span>
+        <span className="text-[11px] text-mute">{data.kind === "kg" ? "оцінка 1ПМ (Еплі)" : "макс. повторень"}</span>
       </div>
-      <div className="flex gap-1.5 overflow-x-auto pb-1 text-[11px]">
-        {names.map((n) => (
-          <button key={n} onClick={() => setSel(n)}
-            className={`shrink-0 rounded-full border px-2.5 py-1 ${n === ex ? "border-ink text-ink" : "border-line text-mute"}`}>{n}</button>
-        ))}
-      </div>
-      {pts.length >= 2 ? (
-        <LineChart unit="кг" ariaLabel={`Прогрес: ${ex}`} series={[{ name: "1ПМ", points: pts, color: STRENGTH, kind: "line" }]} />
-      ) : (
-        <div className="text-[11px] text-mute">Ще одне тренування з цією вправою — і буде лінія.</div>
+
+      {days.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto text-[11px]">
+          {(["all", ...days] as (number | "all")[]).map((d) => (
+            <button key={d} onClick={() => setDayFilter(d)}
+              className={`shrink-0 rounded-md border px-2 py-0.5 ${dayFilter === d ? "border-ink text-ink" : "border-line text-mute"}`}>
+              {d === "all" ? "Усі" : `День ${d}`}
+            </button>
+          ))}
+        </div>
       )}
-      {pts.length > 0 && (
+
+      <div className="flex flex-wrap gap-1.5 text-[11px]">
+        {shown.map((x) => {
+          const has = withData.get(x.name)!.pts.length > 0;
+          return (
+            <button key={x.name} onClick={() => setSel(x.name)}
+              className={`rounded-full border px-2.5 py-1 ${x.name === ex ? "border-ink text-ink" : has ? "border-line text-ink/80" : "border-line border-dashed text-mute"}`}>
+              {x.name}{has ? "" : " ·"}
+            </button>
+          );
+        })}
+      </div>
+
+      {pts.length >= 2 ? (
+        <LineChart unit={unit} ariaLabel={`Прогрес: ${ex}`} series={[{ name: data.kind === "kg" ? "1ПМ" : "повтори", points: pts, color: STRENGTH, kind: "line" }]} />
+      ) : (
+        <div className="rounded-md border border-dashed border-line p-3 text-[11px] text-mute">
+          {pts.length === 1 ? "Є один запис — після наступного тренування з цією вправою з'явиться лінія." : "Ще немає даних — виконай тренування з цією вправою, і тут з'явиться графік."}
+        </div>
+      )}
+
+      {pts.length > 0 && pr && (
         <div className="grid grid-cols-3 gap-2 text-center">
           <div className="rounded-md border border-line py-1.5">
-            <div className="text-sm font-bold tabular-nums">{last.y}</div><div className="text-[10px] text-mute">зараз, кг</div>
+            <div className="text-sm font-bold tabular-nums">{last.y}</div><div className="text-[10px] text-mute">зараз, {unit}</div>
           </div>
           <div className="rounded-md border border-line py-1.5">
             <div className="text-sm font-bold tabular-nums">{pr.y}</div><div className="text-[10px] text-mute">рекорд · {ddmm(pr.date)}</div>
@@ -149,7 +185,8 @@ function StrengthCard() {
           </div>
         </div>
       )}
-      <TableToggle rows={pts.map((p) => ({ date: p.date, text: `≈${p.y} кг · ${p.label ?? ""}` }))} />
+      {pts.length > 0 && <TableToggle rows={pts.map((p) => ({ date: p.date, text: `${data.kind === "kg" ? "≈" : ""}${p.y} ${unit} · ${p.label ?? ""}` }))} />}
+      <div className="text-[10px] text-mute">Пунктир — вправа з плану, яку ще не виконував.</div>
     </Card>
   );
 }

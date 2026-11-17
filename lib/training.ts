@@ -217,3 +217,33 @@ export const EXERCISE_LIBRARY = [
   // Кор
   "Планка", "Підйом ніг у висі", "Скручування на блоці", "Колесо для преса",
 ];
+
+/** Для вправ без ваги (підтягування, віджимання): найбільше повторень за тренування. */
+export function repsSeries(logs: WorkoutLog[], exercise: string): Point[] {
+  const key = exercise.trim().toLowerCase();
+  const byDate = new Map<string, Point>();
+  for (const l of logs) {
+    const e = l.exercises.find((x) => x.name.trim().toLowerCase() === key);
+    if (!e || !e.sets.length) continue;
+    const best = Math.max(...e.sets.map((s) => s.reps));
+    const total = e.sets.reduce((a, s) => a + s.reps, 0);
+    const prev = byDate.get(l.date);
+    if (!prev || best > prev.y) byDate.set(l.date, { date: l.date, y: best, label: `${e.sets.length} підх. · всього ${total} повт.` });
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Усі вправи для статистики: спершу з плану (по днях), потім ті, що є лише в журналі. */
+export function statsExercises(plan: TrainingPlan | undefined, logs: WorkoutLog[]) {
+  const seen = new Set<string>();
+  const out: { name: string; day?: number }[] = [];
+  plan?.days.forEach((d, i) => d.exercises.forEach((e) => {
+    const k = e.name.trim().toLowerCase();
+    if (k && !seen.has(k)) { seen.add(k); out.push({ name: e.name.trim(), day: i + 1 }); }
+  }));
+  for (const l of logs) for (const e of l.exercises) {
+    const k = e.name.trim().toLowerCase();
+    if (k && !seen.has(k)) { seen.add(k); out.push({ name: e.name.trim() }); }
+  }
+  return out;
+}

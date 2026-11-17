@@ -8,7 +8,7 @@ import { TrainingScreen } from "@/components/TrainingScreen";
 import { Card } from "@/components/ui";
 import { AccountBox } from "@/components/AccountBox";
 import { useGame } from "@/lib/store";
-import { startSync, SyncStatus } from "@/lib/supabase";
+import { Account, onAccount, startSync, SyncStatus } from "@/lib/supabase";
 import { kcalGoal, proteinGoal, waterGoal } from "@/lib/game";
 
 type Tab = "home" | "skills" | "training" | "activity" | "quests";
@@ -61,6 +61,8 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>("home");
   const [editing, setEditing] = useState(false);
   const [sync, setSync] = useState<SyncStatus>("offline");
+  const [account, setAccount] = useState<Account | null>(null);
+  useEffect(() => onAccount(setAccount), []);
   const applyDailyTick = useGame((s) => s.applyDailyTick);
 
   useEffect(() => {
@@ -80,9 +82,9 @@ export default function Home() {
     <main className="mx-auto min-h-dvh max-w-5xl px-4 pt-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))]">
       <header className="mb-3 flex items-center justify-between text-xs text-mute">
         <span className="tracking-[0.3em]">REAL·LIFE·RPG</span>
-        <span className="flex items-center gap-1.5" title={`sync: ${sync}`}>
+        <span className="flex items-center gap-1.5 cursor-pointer" title={`sync: ${sync}`} onClick={() => setEditing(true)}>
           <span className="size-2 rounded-full" style={{ background: syncDot }} />
-          {sync === "offline" ? "локально" : sync}
+          {sync === "offline" ? "локально" : sync === "error" ? "помилка синхр." : sync === "syncing" ? "синхронізація…" : account?.email ? `☁ ${account.email.split("@")[0]}` : "гість · лише цей пристрій"}
         </span>
       </header>
 
