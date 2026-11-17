@@ -182,8 +182,9 @@ function WorkoutMode({ onFinished }: { onFinished: (l: WorkoutLog | null) => voi
                       const willBeDone = !st.done;
                       const patch: Partial<typeof st> = { done: willBeDone };
                       // Порожні поля → беремо підказку (минулий результат / нижню межу повторень).
-                      if (willBeDone && !st.weight && prev) patch.weight = prev.best.weight;
-                      if (willBeDone && !st.reps) patch.reps = Number(ex.reps.split(/[-–]/)[0]) || 0;
+                      const before = (active.sets[i] ?? [])[j - 1];
+                      if (willBeDone && !st.weight) patch.weight = before?.weight || prev?.best.weight || 0;
+                      if (willBeDone && !st.reps) patch.reps = before?.reps || Number(ex.reps.split(/[-–]/)[0]) || 0;
                       updateSet(i, j, patch);
                       if (willBeDone) setRestUntil(Date.now() + ex.restSec * 1000);
                     }}

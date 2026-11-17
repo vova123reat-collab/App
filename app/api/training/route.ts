@@ -6,7 +6,7 @@ import {
 } from "@/lib/training";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const exercise = {
   type: Type.OBJECT,
@@ -118,7 +118,10 @@ ${a.notes ? `- Побажання: ${a.notes}` : ""}
 Назви вправ — українською, коротко (напр. «Присідання зі штангою», «Жим гантелей лежачи під кутом 30°»).`;
 
   try {
-    const data = await generateJson<Omit<TrainingPlan, "createdAt">>(prompt, schema, 0.3);
+    const data = await generateJson<Omit<TrainingPlan, "createdAt">>(prompt, schema, 0.3, {
+      timeoutMs: 100_000, // великий план генерується 30–60 с
+      deadlineMs: 280_000,
+    });
     if (!data.days?.length || !data.nutrition) throw new Error("bad shape");
     const plan: TrainingPlan = { ...data, createdAt: new Date().toISOString() };
     return NextResponse.json({ plan, answers: a });
