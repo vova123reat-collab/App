@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Bar, Card, Label } from "./ui";
 import { useGame } from "@/lib/store";
-import { Attr, fmtHM, SKILL_TARGET_MIN, skillStageIndex, Stage, STAGE_TEMPLATE, uid } from "@/lib/game";
+import { Attr, ATTR_KEYS, ATTRS, fmtHM, SKILL_TARGET_MIN, skillStageIndex, Stage, STAGE_TEMPLATE, uid } from "@/lib/game";
 
 function SkillBuilder({ onDone }: { onDone: () => void }) {
   const addSkill = useGame((s) => s.addSkill);
@@ -61,8 +61,7 @@ function SkillBuilder({ onDone }: { onDone: () => void }) {
       />
       <div className="flex gap-2">
         <select value={attr} onChange={(e) => setAttr(e.target.value as Attr)} className="!w-auto text-sm">
-          <option value="int">Інтелект</option>
-          <option value="str">Сила</option>
+          {ATTR_KEYS.map((k) => <option key={k} value={k}>{ATTRS[k].name}</option>)}
         </select>
         <button className="btn btn-primary flex-1" onClick={generate} disabled={loading}>
           {loading ? "ШІ розбирає…" : "✦ РОЗІБРАТИ З ШІ"}
@@ -116,9 +115,7 @@ export function SkillsScreen() {
             <button className="w-full text-left" onClick={() => setOpen(isOpen ? null : k.id)}>
               <div className="flex items-baseline justify-between gap-2">
                 <b className="truncate">{k.name}</b>
-                <span className={`text-[11px] ${k.attr === "int" ? "text-[#a78bfa]" : "text-[#fb923c]"}`}>
-                  {k.attr === "int" ? "INT" : "STR"}
-                </span>
+                <span className="text-[11px]" style={{ color: ATTRS[k.attr]?.color }}>{ATTRS[k.attr]?.short}</span>
               </div>
               <div className="mt-2"><Bar value={k.minutes} max={SKILL_TARGET_MIN} color="linear-gradient(90deg,#16a34a,#4ade80)" /></div>
               <div className="mt-1 flex justify-between text-[11px] text-mute">

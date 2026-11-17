@@ -3,16 +3,18 @@ import { useEffect, useState } from "react";
 import { CharacterCard, FocusCard, FuelCard } from "@/components/HomeCards";
 import { SkillsScreen } from "@/components/SkillsScreen";
 import { QuestsScreen } from "@/components/QuestsScreen";
+import { ActivityScreen } from "@/components/ActivityScreen";
 import { Card } from "@/components/ui";
 import { useGame } from "@/lib/store";
 import { startSync, SyncStatus } from "@/lib/supabase";
-import { proteinGoal, waterGoal } from "@/lib/game";
+import { kcalGoal, proteinGoal, waterGoal } from "@/lib/game";
 
-type Tab = "home" | "skills" | "quests";
+type Tab = "home" | "skills" | "activity" | "quests";
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "home", label: "Персонаж", icon: "◉" },
   { id: "skills", label: "Навички", icon: "⌬" },
+  { id: "activity", label: "Активність", icon: "⚡" },
   { id: "quests", label: "Квести", icon: "☰" },
 ];
 
@@ -20,8 +22,8 @@ function ProfileSheet({ onClose }: { onClose: () => void }) {
   const { profile, setProfile } = useGame();
   const num = (v: string) => Number(v.replace(",", ".")) || 0;
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 grid items-end sm:place-items-center" onClick={onClose}>
-      <div className="w-full sm:max-w-md" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 bg-black/70 grid grid-cols-[minmax(0,1fr)] items-end sm:place-items-center" onClick={onClose}>
+      <div className="w-full min-w-0 sm:max-w-md" onClick={(e) => e.stopPropagation()}>
         <Card className="space-y-3 rounded-b-none sm:rounded-b-xl pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <div className="flex justify-between"><b>Профіль</b><button onClick={onClose} className="text-mute">✕</button></div>
           <label className="block text-xs text-mute">Імʼя
@@ -38,6 +40,9 @@ function ProfileSheet({ onClose }: { onClose: () => void }) {
               <input inputMode="decimal" defaultValue={profile.waterPerKg} onBlur={(e) => setProfile({ waterPerKg: num(e.target.value) })} className="mt-1 text-sm" />
             </label>
           </div>
+          <label className="block text-xs text-mute">Калорії на день (0 — не рахувати)
+            <input inputMode="numeric" defaultValue={kcalGoal(profile)} onBlur={(e) => setProfile({ kcalGoal: Math.round(num(e.target.value)) })} className="mt-1 text-sm" />
+          </label>
           <div className="text-xs text-mute">
             Ціль: білок <b className="text-ink">{proteinGoal(profile)} г</b> · вода <b className="text-ink">{waterGoal(profile)} мл</b>
           </div>
@@ -89,10 +94,11 @@ export default function Home() {
         </div>
       )}
       {tab === "skills" && <SkillsScreen />}
+      {tab === "activity" && <ActivityScreen />}
       {tab === "quests" && <QuestsScreen />}
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-bg/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto grid max-w-5xl grid-cols-3">
+        <div className="mx-auto grid max-w-5xl grid-cols-4">
           {TABS.map((t) => (
             <button
               key={t.id}

@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Bar, Card } from "./ui";
 import { isBuffed, todayLog, useGame } from "@/lib/store";
-import { Attr, BUFF_MULT, HP_LOSS_PER_MISSED_QUEST, HP_MAX, QUEST_XP } from "@/lib/game";
+import { Attr, ATTR_KEYS, ATTRS, BUFF_MULT, HP_LOSS_PER_MISSED_QUEST, HP_MAX, QUEST_XP } from "@/lib/game";
 
 export function QuestsScreen() {
   const s = useGame();
@@ -53,8 +53,7 @@ export function QuestsScreen() {
       <Card className="flex gap-2">
         <input placeholder="новий квест" value={title} onChange={(e) => setTitle(e.target.value)} className="text-sm" />
         <select value={attr} onChange={(e) => setAttr(e.target.value as Attr)} className="!w-auto text-sm">
-          <option value="str">STR</option>
-          <option value="int">INT</option>
+          {ATTR_KEYS.map((k) => <option key={k} value={k}>{ATTRS[k].short}</option>)}
         </select>
         <button
           className="btn shrink-0"

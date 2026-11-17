@@ -2,14 +2,14 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
-  addDays, Attr, BUFF_MULT, DayLog, DEFAULT_QUESTS, dayFueled, emptyDay, HP_GAIN_PER_QUEST,
-  HP_LOSS_PER_MISSED_QUEST, HP_MAX, Profile, Quest, QUEST_XP, Session, Skill, Stage, Timer,
-  today, uid,
+  Activity, ActivityEntry, addDays, Attr, BUFF_MULT, DayLog, DEFAULT_QUESTS, dayFueled, emptyDay, emptyXp,
+  FoodEntry, HP_GAIN_PER_QUEST, HP_LOSS_PER_MISSED_QUEST, HP_MAX, Nutrition, Profile, Quest, QUEST_XP,
+  Session, Skill, Stage, Timer, today, uid,
 } from "./game";
 
 export interface GameState {
   profile: Profile;
-  xp: { int: number; str: number };
+  xp: Record<Attr, number>;
   hp: number;
   hpCheckedThrough: string; // останній день, за який вже нараховано штраф HP
   days: Record<string, DayLog>;
@@ -24,6 +24,10 @@ interface Actions {
   setProfile: (p: Partial<Profile>) => void;
   addProtein: (g: number) => void;
   addWater: (ml: number) => void;
+  addFoods: (items: (Nutrition & { name: string; grams: number })[]) => void;
+  removeFood: (id: string) => void;
+  logActivity: (a: Activity, amount: number) => ActivityEntry;
+  removeActivity: (id: string) => void;
   toggleQuest: (id: string) => void;
   addQuest: (title: string, attr: Attr) => void;
   removeQuest: (id: string) => void;
@@ -39,7 +43,7 @@ interface Actions {
 
 export const initialState = (): GameState => ({
   profile: { name: "Гравець", weightKg: 75, proteinPerKg: 1.6, waterPerKg: 33 },
-  xp: { int: 0, str: 0 },
+  xp: emptyXp(),
   hp: HP_MAX,
   hpCheckedThrough: addDays(today(), -1),
   days: {},
@@ -72,6 +76,57 @@ export const useGame = create<GameState & Actions>()(
 
         addProtein: (g) => updateDay((d) => ({ ...d, protein: Math.max(0, d.protein + g) })),
         addWater: (ml) => updateDay((d) => ({ ...d, water: Math.max(0, d.water + ml) })),
+
+        addFoods: (items) =>
+          updateDay((d) => {
+            const entries: FoodEntry[] = items.map((x) => ({ ...x, id: uid(), at: Date.now() }));
+            const sum = (k: keyof Nutrition) => entries.reduce((a, e) => a + e[k], 0);
+            const r1 = (x: number) => Math.round(x * 10) / 10;
+            return {
+              ...d,
+              foods: [...(d.foods ?? []), ...entries],
+              protein: Math.round(d.protein + sum("protein")),
+              kcal: Math.round((d.kcal ?? 0) + sum("kcal")),
+              fat: r1((d.fat ?? 0) + sum("fat")),
+              carbs: r1((d.carbs ?? 0) + sum("carbs")),
+            };
+          }),
+
+        removeFood: (id) =>
+          updateDay((d) => {
+            const f = d.foods?.find((x) => x.id === id);
+            if (!f) return d;
+            const r1 = (x: number) => Math.max(0, Math.round(x * 10) / 10);
+            return {
+              ...d,
+              foods: d.foods!.filter((x) => x.id !== id),
+              protein: Math.max(0, Math.round(d.protein - f.protein)),
+              kcal: Math.max(0, Math.round((d.kcal ?? 0) - f.kcal)),
+              fat: r1((d.fat ?? 0) - f.fat),
+              carbs: r1((d.carbs ?? 0) - f.carbs),
+            };
+          }),
+
+        logActivity: (a, amount) => {
+          const s = get();
+          const mult = isBuffed(s) ? BUFF_MULT : 1;
+          const units = a.kind === "once" ? 1 : amount;
+          const entry: ActivityEntry = {
+            id: uid(), activityId: a.id, amount: units, attr: a.attr,
+            xp: Math.round(units * a.xpPerUnit * mult), at: Date.now(),
+          };
+          updateDay((d) => ({ ...d, activities: [...(d.activities ?? []), entry] }));
+          set(touch({ xp: { ...get().xp, [a.attr]: get().xp[a.attr] + entry.xp } }));
+          return entry;
+        },
+
+        removeActivity: (id) => {
+          const e = todayLog(get()).activities?.find((x) => x.id === id);
+          if (!e) return;
+          updateDay((d) => ({ ...d, activities: (d.activities ?? []).filter((x) => x.id !== id) }));
+          const xp = get().xp;
+          set(touch({ xp: { ...xp, [e.attr]: Math.max(0, xp[e.attr] - e.xp) } }));
+        },
 
         toggleQuest: (id) => {
           const s = get();
@@ -164,12 +219,13 @@ export const useGame = create<GameState & Actions>()(
           }
         },
 
-        replaceAll: (state) => set({ ...state }),
+        replaceAll: (state) => set(normalize(state)),
       };
     },
     {
       name: "rl-rpg",
-      version: 1,
+      version: 2,
+      migrate: (persisted) => normalize(persisted as GameState),
       partialize: (s) => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { profile, xp, hp, hpCheckedThrough, days, skills, sessions, quests, timer, updatedAt } = s;
@@ -178,6 +234,11 @@ export const useGame = create<GameState & Actions>()(
     },
   ),
 );
+
+/** Приводить старі збереження (v1: лише INT/STR) до поточної форми. */
+export function normalize(s: GameState): GameState {
+  return { ...initialState(), ...s, xp: { ...emptyXp(), ...(s?.xp ?? {}) } };
+}
 
 export const snapshot = (): GameState => {
   const { profile, xp, hp, hpCheckedThrough, days, skills, sessions, quests, timer, updatedAt } = useGame.getState();

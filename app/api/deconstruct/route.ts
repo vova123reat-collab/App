@@ -1,9 +1,8 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import { NextResponse } from "next/server";
+import { generateJson } from "@/lib/gemini";
 
 export const runtime = "nodejs";
-
-const DEFAULT_MODEL = "gemini-3.8-flash";
 
 const STAGES = [
   "Етап 1 (Години 1–3) — База і терміни: що треба зрозуміти в теорії, щоб не плавати.",
@@ -15,7 +14,11 @@ const STAGES = [
 const schema = {
   type: Type.OBJECT,
   properties: {
-    attr: { type: Type.STRING, enum: ["int", "str"], description: "int — розумова навичка, str — фізична" },
+    attr: {
+      type: Type.STRING,
+      enum: ["int", "str", "end", "spi"],
+      description: "int — розумова/технічна, str — сила, end — витривалість/рухливість, spi — дух, емоції, творчість, комунікація",
+    },
     stages: {
       type: Type.ARRAY,
       minItems: "4",
@@ -33,9 +36,6 @@ const schema = {
 };
 
 export async function POST(req: Request) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: "GEMINI_API_KEY не задано" }, { status: 503 });
-
   const { skill, context } = (await req.json().catch(() => ({}))) as { skill?: string; context?: string };
   const name = (skill ?? "").trim().slice(0, 120);
   if (!name) return NextResponse.json({ error: "Вкажи назву навички" }, { status: 400 });
@@ -49,28 +49,12 @@ ${context ? `Контекст користувача: ${context.slice(0, 400)}\n
 Без води та загальних порад.`;
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const call = (model: string) =>
-      ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.6 },
-      });
-    const wanted = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-    let res;
-    try {
-      res = await call(wanted);
-    } catch (e) {
-      // Модель з env знято з продажу → пробуємо модель за замовчуванням.
-      if ((e as { status?: number }).status !== 404 || wanted === DEFAULT_MODEL) throw e;
-      console.warn(`[deconstruct] model ${wanted} unavailable, falling back to ${DEFAULT_MODEL}`);
-      res = await call(DEFAULT_MODEL);
-    }
-    const data = JSON.parse(res.text ?? "{}") as { attr: "int" | "str"; stages: { steps: string[] }[] };
+    const data = await generateJson<{ attr: string; stages: { steps: string[] }[] }>(prompt, schema, 0.6);
     if (!Array.isArray(data.stages) || data.stages.length !== 4) throw new Error("bad shape");
     return NextResponse.json(data);
   } catch (e) {
     console.error("[deconstruct]", e);
-    return NextResponse.json({ error: "ШІ не відповів. Спробуй ще раз." }, { status: 502 });
+    const status = (e as { status?: number }).status === 503 ? 503 : 502;
+    return NextResponse.json({ error: status === 503 ? "ШІ не налаштовано" : "ШІ не відповів. Спробуй ще раз." }, { status });
   }
 }

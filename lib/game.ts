@@ -1,6 +1,15 @@
 // Чиста ігрова логіка: типи, формули рівнів, бафи, HP.
 
-export type Attr = "int" | "str";
+export type Attr = "int" | "str" | "end" | "spi";
+
+export const ATTRS: Record<Attr, { short: string; name: string; color: string }> = {
+  int: { short: "INT", name: "Інтелект", color: "#a78bfa" },
+  str: { short: "STR", name: "Сила", color: "#fb923c" },
+  end: { short: "END", name: "Витривалість", color: "#22d3ee" },
+  spi: { short: "SPI", name: "Дух", color: "#f472b6" },
+};
+export const ATTR_KEYS = Object.keys(ATTRS) as Attr[];
+export const emptyXp = (): Record<Attr, number> => ({ int: 0, str: 0, end: 0, spi: 0 });
 
 export interface Step {
   id: string;
@@ -32,10 +41,40 @@ export interface Session {
   date: string; // YYYY-MM-DD
 }
 
+/** Харчова цінність на 100 г. */
+export interface Nutrition {
+  kcal: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+}
+
+export interface FoodEntry extends Nutrition {
+  // значення вже перераховані на з'їдену порцію
+  id: string;
+  name: string;
+  grams: number;
+  at: number;
+}
+
+export interface ActivityEntry {
+  id: string;
+  activityId: string;
+  amount: number; // хвилини або 1 для разових
+  xp: number;
+  attr: Attr;
+  at: number;
+}
+
 export interface DayLog {
   protein: number; // г
   water: number; // мл
+  kcal?: number;
+  fat?: number;
+  carbs?: number;
   quests: string[]; // id виконаних квестів
+  foods?: FoodEntry[];
+  activities?: ActivityEntry[];
 }
 
 export interface Quest {
@@ -55,6 +94,7 @@ export interface Profile {
   weightKg: number;
   proteinPerKg: number; // г білка на кг
   waterPerKg: number; // мл води на кг
+  kcalGoal?: number; // ккал на день (0/порожньо = не відстежувати)
 }
 
 export const SKILL_TARGET_MIN = 20 * 60;
@@ -90,7 +130,34 @@ export const addDays = (iso: string, n: number) => {
 export const proteinGoal = (p: Profile) => Math.round(p.weightKg * p.proteinPerKg);
 export const waterGoal = (p: Profile) => Math.round((p.weightKg * p.waterPerKg) / 50) * 50;
 
+export const kcalGoal = (p: Profile) => p.kcalGoal ?? Math.round((p.weightKg * 30) / 50) * 50;
+
 export const emptyDay = (): DayLog => ({ protein: 0, water: 0, quests: [] });
+
+/** Активності: швидкий лог дій, що качають характеристики. */
+export interface Activity {
+  id: string;
+  name: string;
+  attr: Attr;
+  kind: "minutes" | "once";
+  xpPerUnit: number; // XP за хвилину або за разове виконання
+  presets?: number[];
+}
+
+export const ACTIVITIES: Activity[] = [
+  { id: "a-strength", name: "Силове тренування", attr: "str", kind: "minutes", xpPerUnit: 1, presets: [30, 45, 60] },
+  { id: "a-calisthenics", name: "Калістеніка / турнік", attr: "str", kind: "minutes", xpPerUnit: 1, presets: [15, 30, 45] },
+  { id: "a-cardio", name: "Біг / кардіо", attr: "end", kind: "minutes", xpPerUnit: 1.2, presets: [20, 30, 45] },
+  { id: "a-steps", name: "10 000 кроків", attr: "end", kind: "once", xpPerUnit: 25 },
+  { id: "a-mobility", name: "Розтяжка / йога", attr: "end", kind: "minutes", xpPerUnit: 0.8, presets: [10, 20, 30] },
+  { id: "a-read", name: "Читання", attr: "int", kind: "minutes", xpPerUnit: 0.8, presets: [15, 30, 60] },
+  { id: "a-course", name: "Курс / лекція", attr: "int", kind: "minutes", xpPerUnit: 0.8, presets: [20, 40, 60] },
+  { id: "a-language", name: "Іноземна мова", attr: "int", kind: "minutes", xpPerUnit: 1, presets: [15, 30] },
+  { id: "a-meditation", name: "Медитація / дихання", attr: "spi", kind: "minutes", xpPerUnit: 1.5, presets: [5, 10, 20] },
+  { id: "a-sleep", name: "Сон 7+ годин", attr: "spi", kind: "once", xpPerUnit: 25 },
+  { id: "a-journal", name: "Щоденник / рефлексія", attr: "spi", kind: "once", xpPerUnit: 15 },
+  { id: "a-nophone", name: "Година без телефону", attr: "spi", kind: "once", xpPerUnit: 15 },
+];
 
 /** Норму закрито → наступного дня баф «Заряджений». */
 export const dayFueled = (log: DayLog | undefined, p: Profile) =>
@@ -130,7 +197,7 @@ export const fmtClock = (ms: number) => {
 };
 
 export const DEFAULT_QUESTS: Quest[] = [
-  { id: "q-mobility", title: "Розминка на мобільність (10 хв)", attr: "str" },
+  { id: "q-mobility", title: "Розминка на мобільність (10 хв)", attr: "end" },
   { id: "q-pushups", title: "30 віджимань", attr: "str" },
   { id: "q-read", title: "Читання (20 сторінок)", attr: "int" },
 ];

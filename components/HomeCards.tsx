@@ -3,13 +3,16 @@ import { useEffect, useState } from "react";
 import { Bar, Card, Label, Ring } from "./ui";
 import { isBuffed, todayLog, useGame } from "@/lib/store";
 import {
-  BUFF_MULT, fmtClock, HP_MAX, levelInfo, proteinGoal, SKILL_TARGET_MIN, skillStageIndex, waterGoal,
+  ATTR_KEYS, ATTRS, BUFF_MULT, fmtClock, HP_MAX, kcalGoal, levelInfo, proteinGoal, SKILL_TARGET_MIN,
+  skillStageIndex, waterGoal,
 } from "@/lib/game";
+import { FoodSheet } from "./FoodSheet";
 import { logSession } from "@/lib/supabase";
 
 export function CharacterCard({ onEdit }: { onEdit: () => void }) {
   const s = useGame();
-  const total = s.xp.int + s.xp.str;
+  const total = ATTR_KEYS.reduce((a, k) => a + s.xp[k], 0);
+  const maxAttr = Math.max(100, ...ATTR_KEYS.map((k) => s.xp[k]));
   const lv = levelInfo(total);
   const buffed = isBuffed(s);
   const initials = s.profile.name.trim().slice(0, 2).toUpperCase() || "??";
@@ -38,12 +41,13 @@ export function CharacterCard({ onEdit }: { onEdit: () => void }) {
         <span className="text-mute">HP</span>
         <Bar value={s.hp} max={HP_MAX} color="linear-gradient(90deg,#991b1b,#ef4444)" />
         <span className="tabular-nums">{s.hp}/{HP_MAX}</span>
-        <span className="text-mute">INT</span>
-        <Bar value={s.xp.int} max={Math.max(100, total)} color="#a78bfa" segmented={false} height={4} />
-        <span className="tabular-nums">{s.xp.int}</span>
-        <span className="text-mute">STR</span>
-        <Bar value={s.xp.str} max={Math.max(100, total)} color="#fb923c" segmented={false} height={4} />
-        <span className="tabular-nums">{s.xp.str}</span>
+        {ATTR_KEYS.map((k) => (
+          <div key={k} className="contents">
+            <span className="text-mute" title={ATTRS[k].name}>{ATTRS[k].short}</span>
+            <Bar value={s.xp[k]} max={maxAttr} color={ATTRS[k].color} segmented={false} height={4} />
+            <span className="tabular-nums">{s.xp[k]}</span>
+          </div>
+        ))}
       </div>
 
       <div
@@ -64,7 +68,12 @@ export function FuelCard() {
   const wg = waterGoal(s.profile);
   const addProtein = useGame((x) => x.addProtein);
   const addWater = useGame((x) => x.addWater);
+  const removeFood = useGame((x) => x.removeFood);
   const [custom, setCustom] = useState("");
+  const [sheet, setSheet] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+  const kg = kcalGoal(s.profile);
+  const foods = log.foods ?? [];
   const fueled = log.protein >= pg && log.water >= wg;
 
   return (
@@ -81,6 +90,13 @@ export function FuelCard() {
             <div className="flex justify-between text-sm"><b>БІЛОК</b><span className="text-mute text-xs">{log.protein}/{pg}g</span></div>
             <Bar value={log.protein} max={pg} color="linear-gradient(90deg,#b91c1c,#ef4444)" />
           </div>
+          {kg > 0 && (
+            <div>
+              <div className="flex justify-between text-sm"><b>ККАЛ</b><span className="text-mute text-xs">{log.kcal ?? 0}/{kg}</span></div>
+              <Bar value={log.kcal ?? 0} max={kg} color={(log.kcal ?? 0) > kg * 1.1 ? "#f97316" : "linear-gradient(90deg,#a16207,#facc15)"} />
+              <div className="mt-0.5 text-[10px] text-mute tabular-nums">Ж {log.fat ?? 0} · В {log.carbs ?? 0}</div>
+            </div>
+          )}
           <div>
             <div className="flex justify-between text-sm"><b>ВОДА</b><span className="text-mute text-xs">{log.water}/{wg}ml</span></div>
             <Bar value={log.water} max={wg} color="linear-gradient(90deg,#0369a1,#38bdf8)" />
@@ -88,7 +104,8 @@ export function FuelCard() {
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-2">
+      <button className="btn btn-primary mt-3 w-full" onClick={() => setSheet(true)}>+ ПРОДУКТ · КБЖВ</button>
+      <div className="mt-2 grid grid-cols-3 gap-2">
         <button className="btn" onClick={() => addProtein(15)}>+15g<div className="text-[10px] text-mute">яйця/сир</div></button>
         <button className="btn" onClick={() => addProtein(25)}>+25g<div className="text-[10px] text-mute">м&apos;ясо/риба</div></button>
         <button className="btn" onClick={() => addProtein(15)}>+15g<div className="text-[10px] text-mute">бобові/горіхи</div></button>
@@ -110,6 +127,27 @@ export function FuelCard() {
         <button className="btn shrink-0 text-water" onClick={() => addWater(250)}>+250ml</button>
         <button className="btn shrink-0 text-mute" onClick={() => addWater(-250)} aria-label="Відняти воду">−</button>
       </div>
+
+      {foods.length > 0 && (
+        <div className="mt-3">
+          <button className="text-xs text-mute" onClick={() => setShowLog(!showLog)}>
+            {showLog ? "▾" : "▸"} з'їдено сьогодні ({foods.length})
+          </button>
+          {showLog && (
+            <ul className="mt-1 divide-y divide-line text-xs">
+              {foods.map((f) => (
+                <li key={f.id} className="flex items-center gap-2 py-1.5">
+                  <span className="flex-1 truncate">{f.name} · {f.grams} г</span>
+                  <span className="text-protein tabular-nums">{f.protein} Б</span>
+                  <span className="text-mute tabular-nums w-14 text-right">{f.kcal} ккал</span>
+                  <button className="text-mute" onClick={() => removeFood(f.id)} aria-label="Видалити">✕</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {sheet && <FoodSheet onClose={() => setSheet(false)} />}
     </Card>
   );
 }
