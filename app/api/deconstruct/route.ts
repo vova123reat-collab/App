@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
+const DEFAULT_MODEL = "gemini-3.8-flash";
+
 const STAGES = [
   "Етап 1 (Години 1–3) — База і терміни: що треба зрозуміти в теорії, щоб не плавати.",
   "Етап 2 (Години 4–8) — Ізольована механіка: відпрацювання найпростіших елементів окремо.",
@@ -48,11 +50,22 @@ ${context ? `Контекст користувача: ${context.slice(0, 400)}\n
 
   try {
     const ai = new GoogleGenAI({ apiKey });
-    const res = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-      contents: prompt,
-      config: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.6 },
-    });
+    const call = (model: string) =>
+      ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.6 },
+      });
+    const wanted = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+    let res;
+    try {
+      res = await call(wanted);
+    } catch (e) {
+      // Модель з env знято з продажу → пробуємо модель за замовчуванням.
+      if ((e as { status?: number }).status !== 404 || wanted === DEFAULT_MODEL) throw e;
+      console.warn(`[deconstruct] model ${wanted} unavailable, falling back to ${DEFAULT_MODEL}`);
+      res = await call(DEFAULT_MODEL);
+    }
     const data = JSON.parse(res.text ?? "{}") as { attr: "int" | "str"; stages: { steps: string[] }[] };
     if (!Array.isArray(data.stages) || data.stages.length !== 4) throw new Error("bad shape");
     return NextResponse.json(data);
