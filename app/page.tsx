@@ -5,6 +5,7 @@ import { SkillsScreen } from "@/components/SkillsScreen";
 import { QuestsScreen } from "@/components/QuestsScreen";
 import { ActivityScreen } from "@/components/ActivityScreen";
 import { Card } from "@/components/ui";
+import { AccountBox } from "@/components/AccountBox";
 import { useGame } from "@/lib/store";
 import { startSync, SyncStatus } from "@/lib/supabase";
 import { kcalGoal, proteinGoal, waterGoal } from "@/lib/game";
@@ -24,8 +25,9 @@ function ProfileSheet({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/70 grid grid-cols-[minmax(0,1fr)] items-end sm:place-items-center" onClick={onClose}>
       <div className="w-full min-w-0 sm:max-w-md" onClick={(e) => e.stopPropagation()}>
-        <Card className="space-y-3 rounded-b-none sm:rounded-b-xl pb-[calc(1rem+env(safe-area-inset-bottom))]">
+        <Card className="space-y-3 rounded-b-none sm:rounded-b-xl max-h-[88dvh] overflow-y-auto pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <div className="flex justify-between"><b>Профіль</b><button onClick={onClose} className="text-mute">✕</button></div>
+          <AccountBox />
           <label className="block text-xs text-mute">Імʼя
             <input value={profile.name} onChange={(e) => setProfile({ name: e.target.value })} className="mt-1 text-sm" />
           </label>
